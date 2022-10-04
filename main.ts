@@ -35,7 +35,9 @@ export default class TimestampPlugin extends Plugin {
 				const isTS = text.startsWith(":vts=");
 
 				if (isTS) {
-					const time = text.substr(5);
+					// const time = text.substr(5);
+					const regExp = /\d+:\d+:\d+|\d+:\d+/g;
+					const time = text.match(regExp)?.[0];
 					console.log('extracted text ' + time);
 
 					//create button for each timestamp
@@ -52,8 +54,15 @@ export default class TimestampPlugin extends Plugin {
 						const timeArr = time.split(":").map((v) => parseInt(v));
 						const [hh, mm, ss] = timeArr.length === 2 ? [0, ...timeArr] : timeArr;
 						const seconds = (hh || 0) * 3600 + (mm || 0) * 60 + (ss || 0);
-						if (this.player) this.player.seekTo(seconds);
-					});
+						
+						const lastLine = text.split(regExp)[1].trim()
+						const idFromLastLine = lastLine.match(/(.*?)(^|\/|v=)([a-z0-9_-]{9,11})(.*)?/gim)
+
+						if (ReactPlayer.canPlay(lastLine) && !this.player?.props?.url?.includes(idFromLastLine[0])) {
+							this.activateView(lastLine, this.editor, seconds)
+						} else {
+							if (this.player) this.player.seekTo(seconds);
+						}					});
 					codeblock.replaceWith(button);
 				}
 			}
@@ -63,7 +72,7 @@ export default class TimestampPlugin extends Plugin {
 		this.registerMarkdownCodeBlockProcessor("timestamp", (source, el, ctx) => {
 			// Match mm:ss or hh:mm:ss timestamp format
 			const regExp = /\d+:\d+:\d+|\d+:\d+/g;
-			const rows = source.split("\n").filter((row) => row.length > 0);
+			const rows = source.split("\n\$").filter((row) => row.length > 0);
 			rows.forEach((row) => {
 				const match = row.match(regExp);
 				if (match) {
@@ -78,8 +87,17 @@ export default class TimestampPlugin extends Plugin {
 					button.addEventListener("click", () => {
 						const timeArr = match[0].split(":").map((v) => parseInt(v));
 						const [hh, mm, ss] = timeArr.length === 2 ? [0, ...timeArr] : timeArr;
-						const seconds = (hh || 0) * 3600 + (mm || 0) * 60 + (ss || 0);
-						if (this.player) this.player.seekTo(seconds);
+						const seconds = (hh || 0) * 3600 + (mm || 0) * 60 + (ss || 0); 
+
+						const lastLine = row.match("(.*)$")[0].trim();
+						const idFromLastLine = lastLine.match(/(.*?)(^|\/|v=)([a-z0-9_-]{9,11})(.*)?/gim);
+						
+						if ( ReactPlayer.canPlay(lastLine) && !this.player?.props?.url?.includes(idFromLastLine[0]) ) {
+							this.activateView(lastLine, this.editor, seconds);
+						} else {
+							if (this.player) this.player.seekTo(seconds);
+						}
+						
 					});
 					div.appendChild(button);
 				}
@@ -149,7 +167,9 @@ export default class TimestampPlugin extends Plugin {
 				const time = (hours > 0 ? leadingZero(hours) + ":" : "") + leadingZero(minutes) + ":" + leadingZero(seconds);
 
 				// insert timestamp into editor
-				editor.replaceSelection("```timestamp \n " + time + "\n```\n")
+				const currentUrl = this.player.props.url;
+				const regexp_ = new RegExp("youtube.com|youtu.be|vimeo.com");
+				editor.replaceSelection("```timestamp \n " + `${time}${currentUrl.match(regexp_) ? "\n"+currentUrl : ""}` + "\n```\n");
 			}
 		});
 
@@ -171,7 +191,9 @@ export default class TimestampPlugin extends Plugin {
 				const time = (hours > 0 ? leadingZero(hours) + ":" : "") + leadingZero(minutes) + ":" + leadingZero(seconds);
 
 				// insert timestamp into editor
-				editor.replaceSelection("`:vts=" + time + "`")
+				const currentUrl = this.player.props.url;
+				const regexp_ = new RegExp("youtube.com|youtu.be|vimeo.com");
+				editor.replaceSelection("`:vts=" + `${time} ${currentUrl.match(regexp_) ? currentUrl : ""}` + "`");
 			}
 		});
 
@@ -226,7 +248,7 @@ export default class TimestampPlugin extends Plugin {
 	}
 
 	// This is called when a valid url is found => it activates the View which loads the React view
-	async activateView(url: string, editor: Editor) {
+	async activateView(url: string, editor: Editor, seconds?: number) {
 		this.app.workspace.detachLeavesOfType(VIDEO_VIEW);
 
 		await this.app.workspace.getRightLeaf(false).setViewState({
@@ -264,7 +286,7 @@ export default class TimestampPlugin extends Plugin {
 					setupPlayer,
 					setupError,
 					saveTimeOnUnload,
-					start: ~~this.settings.urlStartTimeMap.get(url)
+					start: seconds || ~~this.settings.urlStartTimeMap.get(url)
 				});
 
 				await this.saveSettings();
